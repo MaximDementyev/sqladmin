@@ -18,6 +18,9 @@ from typing import (
 from sqlalchemy import Column, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import RelationshipProperty, sessionmaker
+from starlette.datastructures import URL
+from starlette.requests import Request
+from starlette.routing import Mount, Router
 
 from sqladmin._types import MODEL_PROPERTY
 
@@ -322,3 +325,29 @@ def choice_type_coerce_factory(type_: Any) -> Callable[[Any], Any]:
 
 def is_async_session_maker(session_maker: sessionmaker) -> bool:
     return AsyncSession in session_maker.class_.__mro__
+
+
+def local_url_for(request: Request, name: str, **kwargs: Any) -> URL:
+    target_router = request.app.router
+    start_router = request.scope["router"]
+    if start_router == target_router:
+        return request.url_for(name, **kwargs)
+    router_name = get_current_router_name(start_router, target_router)
+    return request.url_for(
+        f"{f'{router_name}:' if router_name else ''}{name}", **kwargs
+    )
+
+
+def get_current_router_name(start_router: Any, target_router: Router) -> str | None:
+    for router in getattr(start_router, "routes", []):
+        if router == target_router:
+            return router.name
+        if not isinstance(router, Mount):
+            continue
+        app_router = getattr(router.app, "router", None)
+        if app_router == target_router:
+            return router.name
+        sub_name = get_current_router_name(router, target_router)
+        if sub_name is not None:
+            return f"{router.name}:{sub_name}"
+    return None
